@@ -1091,9 +1091,14 @@ pub trait Mob: EntityBase + Send + Sync {
         target_entity
             .portal_cooldown
             .store(source_entity.portal_cooldown.load(Relaxed), Relaxed);
-        
-        target_entity.yaw.store(source_entity.yaw.load());
-        target_entity.pitch.store(source_entity.pitch.load());
+
+        target_entity.set_rotation(source_entity.yaw.load(), source_entity.pitch.load());
+        target_entity.head_yaw.store(source_entity.head_yaw.load());
+        target_entity.velocity.store(source_entity.velocity.load());
+
+        if let Some(custom_name) = &**source_entity.custom_name.load() {
+            target_entity.set_custom_name(custom_name.clone());
+        }
 
         target_entity.set_custom_name_visible(source_entity.custom_name_visible.load(Relaxed));
         target_entity.set_on_fire(source_entity.is_on_fire());
@@ -1114,36 +1119,6 @@ pub trait Mob: EntityBase + Send + Sync {
             target_entity.add_scoreboard_tag(&tag);
         }
 
-        if let (Some(source_living), Some(target_living)) =
-            (self.get_living_entity(), output.get_living_entity())
-        {
-            {
-                let src_equip = source_living
-                    .entity_equipment
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let mut dst_equip = target_living
-                    .entity_equipment
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                for (slot, item) in &src_equip.equipment {
-                    dst_equip.put(slot, item.clone());
-                }
-            }
-
-            let effects = source_living
-                .active_effects
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .values()
-                .cloned()
-                .collect::<Vec<_>>();
-            for effect in effects {
-                target_living.add_effect(effect);
-            }
-            target_living.set_absorption(source_living.get_absorption());
-        }
-
         let source_mob = self.get_mob_entity();
         let target_mob = output.get_mob_entity();
         target_mob.set_left_handed(source_mob.is_left_handed());
@@ -1152,6 +1127,37 @@ pub trait Mob: EntityBase + Send + Sync {
         target_mob
             .persistence_required
             .store(source_mob.persistence_required.load(Relaxed), Relaxed);
+
+        let source_living = &source_mob.living_entity;
+        let target_living = &target_mob.living_entity;
+
+        // Equipments handling
+        {
+            let src_equip = source_living
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut dst_equip = target_living
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for (slot, item) in &src_equip.equipment {
+                dst_equip.put(slot, item.clone());
+            }
+        }
+
+        let effects = source_living
+            .active_effects
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for effect in effects {
+            target_living.add_effect(effect);
+        }
+        target_living.set_absorption(source_living.get_absorption());
+        target_living.set_health(source_living.health.load());
 
         if let (Some(source_ageable), Some(target_ageable)) =
             (self.as_ageable(), output.as_ageable())
